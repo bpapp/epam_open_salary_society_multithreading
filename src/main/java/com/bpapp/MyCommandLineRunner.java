@@ -27,12 +27,15 @@ public class MyCommandLineRunner implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
+        StopWatch watch = new StopWatch();
+        watch.start();
         ExecutorService executorService = Executors.newFixedThreadPool(4);
         ExecutorService executorServiceSecond = Executors.newFixedThreadPool(4);
 
         // get list asynch
-        CompletableFuture.supplyAsync(() -> employeeOperations.hiredEmployees(), executorService)
-                .thenCompose(employees -> {
+        List<Employee> employeeResult = CompletableFuture.supplyAsync(() -> employeeOperations.hiredEmployees(),
+                executorService)
+                .thenApplyAsync(employees -> {
                     List<CompletableFuture<Employee>> combinationList = employees.stream()
                             .map(employee ->
                                     CompletableFuture.supplyAsync(() -> {
@@ -47,13 +50,22 @@ public class MyCommandLineRunner implements CommandLineRunner {
 
                     CompletableFuture<Employee>[] combinationArray = combinationList.toArray(new CompletableFuture[combinationList.size()]);
 
-                    return CompletableFuture.allOf(combinationArray).thenRunAsync(() -> Arrays.stream(combinationArray)
-                            .map(CompletableFuture::join)
-                            .collect(Collectors.toList()));
+                    CompletableFuture.allOf(combinationArray).thenRunAsync(() -> Arrays.stream(combinationArray)
+                            .map(CompletableFuture::join));
+                    List<Employee> res = Arrays.stream(combinationArray).map(future -> {
+                        try {
+                            return future.get();
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }).collect(Collectors.toList());
+                    return res;
                 }).join();
 
-//        results.stream().forEach(System.out::println);
+        employeeResult.stream().forEach(System.out::println);
 
+        watch.stop();
+        log.info("running ended with multi thread in " + watch.getTotalTimeMillis() + " msecs");
         executorService.shutdown();
         executorServiceSecond.shutdown();
         log.info("asynch run ended");
@@ -65,7 +77,7 @@ public class MyCommandLineRunner implements CommandLineRunner {
         watch.start();
         log.info("running started with one thread");
         employeeOperations.hiredEmployees().stream().map(i ->
-                new Employee(i.getId(), i.getName(), employeeOperations.getSalary(i.getSalary())))
+                new Employee(i.getId(), i.getName(), employeeOperations.getSalary(i.getId())))
                 .forEach(System.out::println);
         watch.stop();
         log.info("running ended with one thread in " + watch.getTotalTimeMillis() + " msecs");
